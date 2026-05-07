@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "roma-sim"
+version = "0.1.0"
+description = "Roma autonomous-construction simulator: dispatcher R&D engine."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Proprietary" }
+authors = [{ name = "Roma" }]
+dependencies = [
+    "simpy>=4.1.1",
+    "numpy>=1.24",
+    "typer>=0.9.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "hypothesis>=6.92",
+    "ruff>=0.4",
+    "mypy>=1.8",
+]
+
+[project.scripts]
+roma-sim = "roma_sim.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+roma_sim = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+# E501 covered by formatter. B008 fights typer's idiomatic API.
+ignore = ["E501", "B008"]
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
+disallow_untyped_calls = false
+disallow_untyped_defs = false
+no_implicit_optional = true
