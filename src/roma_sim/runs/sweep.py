@@ -23,7 +23,7 @@ from typing import Any, Optional
 from roma_sim.analysis import compute_kpis
 from roma_sim.dispatchers import get_dispatcher
 from roma_sim.engine import run as engine_run
-from roma_sim.runs.store import RunRecord, RunStore
+from roma_sim.runs.store import RunStore
 from roma_sim.scenarios import get_scenario
 
 

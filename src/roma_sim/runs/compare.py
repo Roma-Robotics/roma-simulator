@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import json
 import statistics
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 from roma_sim.runs.store import RunRecord, RunStore
 

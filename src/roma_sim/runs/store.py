@@ -18,10 +18,11 @@ import json
 import sqlite3
 import time
 import uuid
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Optional
+from typing import Any, Optional
 
 import pyarrow as pa
 import pyarrow.parquet as pq

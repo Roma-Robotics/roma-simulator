@@ -9,12 +9,13 @@ Week-2 surface:
     show       — pretty-print one run's metadata + KPIs
     list-dispatchers / list-scenarios
 
-Replay and visual viewer are deferred to Week 3.
+Replay and Streamlit deferred to Week 3.
 """
 
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -28,10 +29,11 @@ from roma_sim.dispatchers import available_dispatchers, get_dispatcher
 from roma_sim.domain.events import EventKind
 from roma_sim.engine import RunResult
 from roma_sim.engine import run as engine_run
-from roma_sim.runs import RunStore, SweepConfig, run_sweep
+from roma_sim.runs import RunStore, SweepConfig, build_viewer_payload, run_sweep
 from roma_sim.runs.compare import aggregate_for_sweep
 from roma_sim.runs.sweep import parse_param_grid, parse_seeds
 from roma_sim.scenarios import get_scenario
+from roma_sim.viewer.builder import open_in_browser, write_viewer
 
 app = typer.Typer(
     name="roma-sim",
@@ -39,7 +41,15 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
 )
-console = Console()
+# Wide width when piped so CI logs and screen captures stay readable.
+# Rich only honors `width` when `height` is also set; otherwise it falls through
+# to terminal detection, which reports 80 columns when stdout isn't a TTY.
+_piped = not sys.stdout.isatty()
+console = (
+    Console(width=160, height=40)
+    if _piped
+    else Console()
+)
 
 
 def _humanize_seconds(s: float) -> str:
@@ -81,6 +91,9 @@ def run(
     out: Path = typer.Option(Path("runs"), "--out", help="Run store root directory."),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress per-event output."),
     also_jsonl: bool = typer.Option(False, "--also-jsonl", help="Also write events.jsonl."),
+    watch: bool = typer.Option(
+        False, "--watch", help="Open the run in the visual viewer when finished."
+    ),
     max_seconds: float = typer.Option(
         30 * 24 * 3600.0, "--max-seconds", help="Hard simulated-time cutoff."
     ),
@@ -147,6 +160,9 @@ def run(
 
     console.print(_summarize(result, kpis))
     console.print(f"[green]wrote run[/] {record.run_id}")
+
+    if watch:
+        _open_viewer_for_run(store, record.run_id)
 
 
 @app.command()
@@ -352,6 +368,54 @@ def show(
     console.print(table)
     console.print("[bold]KPIs:[/]")
     console.print(json.dumps(rec.kpis, indent=2, sort_keys=True))
+
+
+@app.command()
+def play(
+    run_id: str = typer.Argument(..., help="run_id to visualize."),
+    out: Path = typer.Option(Path("runs"), "--out", help="Run store root directory."),
+    no_open: bool = typer.Option(False, "--no-open", help="Don't auto-open the browser."),
+) -> None:
+    """Build a self-contained HTML viewer for a stored run and open it."""
+    store = RunStore(out)
+    html_path = _open_viewer_for_run(store, run_id, auto_open=not no_open)
+    console.print(f"[green]viewer:[/] {html_path}")
+
+
+def _open_viewer_for_run(
+    store: RunStore, run_id: str, auto_open: bool = True
+) -> Path:
+    """Build the viewer HTML for a run and open it in the browser."""
+    rec = store.get_run(run_id)
+    if rec is None:
+        console.print(f"[red]unknown run_id {run_id}[/]")
+        raise typer.Exit(1)
+
+    events = store.load_events(run_id)
+    scen = get_scenario(rec.scenario_name, **rec.params)
+    site, initial_tasks, fleet = scen.build()
+    payload = build_viewer_payload(
+        events,
+        site,
+        fleet,
+        initial_tasks.tasks,
+        run_id=rec.run_id,
+        scenario_name=rec.scenario_name,
+        scenario_version=rec.scenario_version,
+        dispatcher_name=rec.dispatcher_name,
+        dispatcher_version=rec.dispatcher_version,
+        seed=rec.seed,
+        kpis=rec.kpis,
+    )
+    html_path = store.root / "runs" / run_id / "viewer.html"
+    write_viewer(payload, html_path)
+    if auto_open:
+        opened = open_in_browser(html_path)
+        if opened:
+            console.print(f"[dim]opened in browser:[/] {html_path.as_uri()}")
+        else:
+            console.print("[yellow]could not auto-open; visit the URL manually[/]")
+    return html_path
 
 
 @app.command("list-dispatchers")

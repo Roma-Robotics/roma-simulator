@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>roma-sim · __RUN_TITLE__</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --bg-soft: #111;
+    --bg-soft-2: #181818;
+    --fg: #ededed;
+    --fg-dim: #888;
+    --fg-mute: #555;
+    --line: #2a2a2a;
+    --line-strong: #3a3a3a;
+    --accent: #ffe24a;
+    --pour: #6cc7ff;
+    --lift: #ff8a4c;
+    --install: #b388ff;
+    --finish: #66ddaa;
+    --task-pending: #2a2a2a;
+    --task-ready: #4a76b8;
+    --task-running: #ff8a4c;
+    --task-done: #2f8857;
+    --grid: #161616;
+  }
+  html, body { background: var(--bg); color: var(--fg); margin: 0; padding: 0; height: 100%;
+    font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px; line-height: 1.4;
+  }
+  body { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; }
+  header { padding: 14px 18px; border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center; gap: 24px;
+  }
+  header .title { font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+  header .meta { color: var(--fg-dim); font-size: 12px; }
+  header .meta b { color: var(--fg); font-weight: 600; }
+
+  main { display: grid; grid-template-columns: 1fr 320px; min-height: 0; }
+  #stage { position: relative; min-height: 0; min-width: 0; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+
+  aside { border-left: 1px solid var(--line); padding: 14px 16px; overflow: auto;
+    background: var(--bg-soft); display: flex; flex-direction: column; gap: 14px;
+  }
+  aside h3 { margin: 0 0 6px 0; font-size: 11px; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--fg-dim); font-weight: 600;
+  }
+  .kvs { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; }
+  .kvs > div:nth-child(odd) { color: var(--fg-dim); }
+  .kvs > div:nth-child(even) { font-variant-numeric: tabular-nums; }
+  .legend { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; align-items: center; }
+  .swatch { width: 10px; height: 10px; border-radius: 50%; }
+  .swatch.sq { border-radius: 2px; }
+
+  .event-log { font-size: 11px; max-height: 30vh; overflow: auto;
+    background: var(--bg-soft-2); border: 1px solid var(--line); padding: 8px;
+  }
+  .event-log .ev { display: grid; grid-template-columns: 60px 110px 1fr; gap: 8px;
+    color: var(--fg-dim);
+  }
+  .event-log .ev .t { color: var(--fg); font-variant-numeric: tabular-nums; }
+  .event-log .ev .k { color: var(--accent); }
+
+  footer { padding: 10px 18px; border-top: 1px solid var(--line);
+    display: grid; grid-template-columns: auto auto 1fr auto; gap: 14px; align-items: center;
+    background: var(--bg-soft);
+  }
+  button { background: var(--bg-soft-2); color: var(--fg); border: 1px solid var(--line-strong);
+    padding: 6px 10px; cursor: pointer; font: inherit; letter-spacing: 0.06em;
+  }
+  button:hover { background: #222; }
+  button.active { background: var(--accent); color: #000; border-color: var(--accent); }
+  .speed { display: inline-flex; gap: 4px; }
+  .speed button { padding: 6px 8px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .clock { font-variant-numeric: tabular-nums; color: var(--fg-dim); padding: 0 6px; }
+  .clock b { color: var(--fg); }
+
+  .pill { display: inline-block; padding: 1px 6px; border-radius: 999px;
+    font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
+    background: var(--bg-soft-2); border: 1px solid var(--line-strong);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="title">roma-sim · viewer</div>
+    <div class="meta">
+      <b id="m-scenario">—</b> · dispatcher <b id="m-dispatcher">—</b>
+      · seed <b id="m-seed">—</b> · makespan <b id="m-makespan">—</b>
+    </div>
+  </div>
+  <div class="meta" id="m-runid">run_id: —</div>
+</header>
+
+<main>
+  <div id="stage">
+    <canvas id="cv"></canvas>
+  </div>
+  <aside>
+    <section>
+      <h3>state</h3>
+      <div class="kvs" id="state-kvs"></div>
+    </section>
+    <section>
+      <h3>kpis</h3>
+      <div class="kvs" id="kpi-kvs"></div>
+    </section>
+    <section>
+      <h3>legend</h3>
+      <div class="legend" id="legend"></div>
+    </section>
+    <section>
+      <h3>recent events</h3>
+      <div class="event-log" id="event-log"></div>
+    </section>
+  </aside>
+</main>
+
+<footer>
+  <button id="play">▶ play</button>
+  <div class="speed">
+    <button data-speed="1">1×</button>
+    <button data-speed="60">60×</button>
+    <button data-speed="600" class="active">600×</button>
+    <button data-speed="3600">3600×</button>
+  </div>
+  <input id="scrub" type="range" min="0" max="1000" value="0" step="0.1">
+  <div class="clock"><b id="clock">0.0s</b> / <span id="clock-total">—</span></div>
+</footer>
+
+<script id="run-data" type="application/json">__RUN_DATA__</script>
+<script>
+(() => {
+  const DATA = JSON.parse(document.getElementById('run-data').textContent);
+
+  // --- skill colors -----------------------------------------------------
+  const SKILL_COLORS = {
+    pour: '#6cc7ff', lift: '#ff8a4c', install: '#b388ff', finish: '#66ddaa',
+  };
+  const skillColor = (s) => SKILL_COLORS[s] || '#ededed';
+
+  // --- header / kpi panel ----------------------------------------------
+  document.getElementById('m-scenario').textContent =
+    DATA.scenario.name + ' v' + DATA.scenario.version;
+  document.getElementById('m-dispatcher').textContent =
+    DATA.dispatcher.name + ' v' + DATA.dispatcher.version;
+  document.getElementById('m-seed').textContent = DATA.seed;
+  document.getElementById('m-makespan').textContent = humanSecs(DATA.makespan_s);
+  document.getElementById('m-runid').textContent = 'run_id: ' + DATA.run_id;
+
+  // KPI panel
+  const kpiEl = document.getElementById('kpi-kvs');
+  const kpis = DATA.kpis || {};
+  const kpiOrder = [
+    ['makespan_s', 'makespan', humanSecs],
+    ['n_tasks_completed', 'tasks done', (v, k) => v + '/' + (kpis.n_tasks_total ?? '?')],
+    ['crew_idle_fraction', 'crew idle', (v) => (v * 100).toFixed(1) + '%'],
+    ['throughput_tasks_per_hour', 'tasks/h', (v) => v.toFixed(2)],
+    ['cycle_time_p50_s', 'cycle p50', humanSecs],
+    ['cycle_time_p95_s', 'cycle p95', humanSecs],
+    ['total_travel_m', 'travel', (v) => v.toFixed(0) + ' m'],
+    ['dispatch_decisions', 'dispatches', (v) => v + ''],
+  ];
+  for (const [key, label, fmt] of kpiOrder) {
+    if (kpis[key] === undefined) continue;
+    addKV(kpiEl, label, fmt(kpis[key], key));
+  }
+
+  // Legend
+  const legend = document.getElementById('legend');
+  for (const [skill, color] of Object.entries(SKILL_COLORS)) {
+    const sw = document.createElement('span');
+    sw.className = 'swatch'; sw.style.background = color;
+    legend.appendChild(sw);
+    const lab = document.createElement('span');
+    lab.textContent = skill;
+    legend.appendChild(lab);
+  }
+  for (const [name, color] of [
+    ['task: pending', getCss('--task-pending')],
+    ['task: ready',   getCss('--task-ready')],
+    ['task: running', getCss('--task-running')],
+    ['task: done',    getCss('--task-done')],
+  ]) {
+    const sw = document.createElement('span');
+    sw.className = 'swatch sq'; sw.style.background = color;
+    legend.appendChild(sw);
+    const lab = document.createElement('span');
+    lab.textContent = name;
+    legend.appendChild(lab);
+  }
+
+  // --- canvas / coordinate transform ------------------------------------
+  const cv = document.getElementById('cv');
+  const ctx = cv.getContext('2d');
+  function fitCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    const r = cv.parentElement.getBoundingClientRect();
+    cv.width = Math.max(1, Math.floor(r.width * dpr));
+    cv.height = Math.max(1, Math.floor(r.height * dpr));
+    cv.style.width = r.width + 'px';
+    cv.style.height = r.height + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', fitCanvas);
+  fitCanvas();
+
+  // sim->screen transform; preserve aspect with letterboxing.
+  function transform() {
+    const r = cv.parentElement.getBoundingClientRect();
+    const pad = 24;
+    const sw = r.width - pad * 2, sh = r.height - pad * 2;
+    const scale = Math.min(sw / DATA.site.width, sh / DATA.site.height);
+    const ox = pad + (sw - DATA.site.width * scale) / 2;
+    const oy = pad + (sh - DATA.site.height * scale) / 2;
+    return { scale, ox, oy, w: r.width, h: r.height };
+  }
+  function toScreen(x, y, t) {
+    return [t.ox + x * t.scale, t.oy + (DATA.site.height - y) * t.scale];
+  }
+
+  // --- agent + task lookup ---------------------------------------------
+  // Sort moves so binary search works on monotonic t0.
+  for (const a of DATA.agents) a.moves.sort((x, y) => x.t0 - y.t0);
+
+  function agentPosAt(agent, t) {
+    const moves = agent.moves;
+    if (!moves.length) return [agent.home[0], agent.home[1]];
+    if (t <= moves[0].t0) return [moves[0].x0, moves[0].y0];
+    // Find the segment whose t0 <= t < t1, or the last segment whose t1 <= t.
+    let lo = 0, hi = moves.length - 1, idx = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (moves[mid].t0 <= t) { idx = mid; lo = mid + 1; } else { hi = mid - 1; }
+    }
+    const seg = moves[idx];
+    if (t >= seg.t1) return [seg.x1, seg.y1];
+    const u = (t - seg.t0) / Math.max(1e-9, seg.t1 - seg.t0);
+    return [seg.x0 + (seg.x1 - seg.x0) * u, seg.y0 + (seg.y1 - seg.y0) * u];
+  }
+
+  function agentBusyAt(agent, t) {
+    for (const w of agent.work) if (t >= w.t0 && t < w.t1) return w.task_id;
+    return null;
+  }
+
+  function taskStateAt(task, t) {
+    if (task.completed_at != null && t >= task.completed_at) return 'done';
+    if (task.started_at != null && t >= task.started_at) return 'running';
+    if (task.ready_at != null && t >= task.ready_at) return 'ready';
+    return 'pending';
+  }
+
+  function taskColor(state) {
+    return ({ pending: getCss('--task-pending'), ready: getCss('--task-ready'),
+             running: getCss('--task-running'), done: getCss('--task-done') })[state];
+  }
+
+  // --- render -----------------------------------------------------------
+  function render(tNow) {
+    const T = transform();
+    ctx.clearRect(0, 0, T.w, T.h);
+
+    // Site background.
+    const [sx0, sy0] = toScreen(0, DATA.site.height, T);
+    const sw = DATA.site.width * T.scale, sh = DATA.site.height * T.scale;
+    ctx.fillStyle = getCss('--grid');
+    ctx.fillRect(sx0, sy0, sw, sh);
+    ctx.strokeStyle = getCss('--line-strong');
+    ctx.lineWidth = 1;
+    ctx.strokeRect(sx0, sy0, sw, sh);
+
+    // Zones.
+    for (const z of DATA.site.zones) {
+      const [x, y] = toScreen(z.x, z.y + z.height, T);
+      const w = z.width * T.scale, h = z.height * T.scale;
+      ctx.fillStyle = '#1d1d1d';
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = getCss('--line');
+      ctx.strokeRect(x, y, w, h);
+      ctx.fillStyle = getCss('--fg-dim');
+      ctx.font = '10px ui-monospace, monospace';
+      ctx.fillText(z.name.toUpperCase(), x + 6, y + 14);
+    }
+
+    // Tasks: small rectangle in their zone, colored by state.
+    // Stack tasks per zone in a grid so they don't overlap.
+    const byZone = {};
+    for (const t of DATA.tasks) (byZone[t.zone_id] ||= []).push(t);
+    for (const zid of Object.keys(byZone)) {
+      const zone = DATA.site.zones.find(z => z.id === zid);
+      if (!zone) continue;
+      const list = byZone[zid];
+      const cols = Math.ceil(Math.sqrt(list.length));
+      const rows = Math.ceil(list.length / cols);
+      const cellW = (zone.width * T.scale - 16) / cols;
+      const cellH = Math.min(14, (zone.height * T.scale - 28) / Math.max(rows, 1));
+      const startX = toScreen(zone.x, zone.y + zone.height, T)[0] + 8;
+      const startY = toScreen(zone.x, zone.y + zone.height, T)[1] + 22;
+      list.forEach((task, i) => {
+        const col = i % cols, row = (i / cols) | 0;
+        const x = startX + col * cellW;
+        const y = startY + row * (cellH + 3);
+        ctx.fillStyle = taskColor(taskStateAt(task, tNow));
+        ctx.fillRect(x, y, cellW - 4, cellH);
+      });
+    }
+
+    // Agents: dot + label + heading line if moving.
+    for (const a of DATA.agents) {
+      const [x, y] = agentPosAt(a, tNow);
+      const [sx, sy] = toScreen(x, y, T);
+      ctx.beginPath();
+      ctx.arc(sx, sy, 8, 0, Math.PI * 2);
+      ctx.fillStyle = skillColor(a.skill);
+      ctx.fill();
+      const taskNow = agentBusyAt(a, tNow);
+      ctx.lineWidth = taskNow ? 2 : 1;
+      ctx.strokeStyle = taskNow ? '#fff' : '#000';
+      ctx.stroke();
+      // Label below the dot.
+      ctx.fillStyle = getCss('--fg-dim');
+      ctx.font = '10px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(a.id, sx, sy + 22);
+      ctx.textAlign = 'left';
+    }
+
+    // HUD: state panel.
+    updateStatePanel(tNow);
+    updateEventLog(tNow);
+    document.getElementById('clock').textContent = humanSecs(tNow);
+  }
+
+  function updateStatePanel(t) {
+    const s = document.getElementById('state-kvs');
+    s.innerHTML = '';
+    let ready = 0, running = 0, done = 0;
+    for (const task of DATA.tasks) {
+      const st = taskStateAt(task, t);
+      if (st === 'ready') ready++;
+      else if (st === 'running') running++;
+      else if (st === 'done') done++;
+    }
+    let busy = 0;
+    for (const a of DATA.agents) if (agentBusyAt(a, t)) busy++;
+    addKV(s, 'time', humanSecs(t));
+    addKV(s, 'progress', ((done / DATA.tasks.length) * 100).toFixed(1) + '%');
+    addKV(s, 'tasks done', done + '/' + DATA.tasks.length);
+    addKV(s, 'tasks running', running + '');
+    addKV(s, 'tasks ready', ready + '');
+    addKV(s, 'agents busy', busy + '/' + DATA.agents.length);
+  }
+
+  function updateEventLog(t) {
+    const el = document.getElementById('event-log');
+    // Keep only the most recent ~20 events up to time t.
+    const recent = [];
+    for (let i = DATA.events.length - 1; i >= 0; i--) {
+      const e = DATA.events[i];
+      if (e.t <= t + 1e-6) {
+        recent.push(e);
+        if (recent.length >= 20) break;
+      }
+    }
+    el.innerHTML = recent.map(e => {
+      const payload = Object.entries(e.payload || {})
+        .filter(([k]) => k !== 'name')
+        .map(([k, v]) => k + '=' + JSON.stringify(v))
+        .join(' ');
+      return `<div class="ev">
+        <span class="t">${humanSecs(e.t)}</span>
+        <span class="k">${e.kind}</span>
+        <span>${payload}</span>
+      </div>`;
+    }).join('');
+  }
+
+  // --- playback ---------------------------------------------------------
+  let tNow = 0;
+  let speed = 600;
+  let playing = false;
+  let last = 0;
+
+  const scrub = document.getElementById('scrub');
+  const playBtn = document.getElementById('play');
+  document.getElementById('clock-total').textContent = humanSecs(DATA.makespan_s);
+
+  function setT(v) {
+    tNow = Math.max(0, Math.min(DATA.makespan_s, v));
+    scrub.value = String((tNow / Math.max(1e-9, DATA.makespan_s)) * 1000);
+    render(tNow);
+  }
+
+  scrub.addEventListener('input', () => {
+    const u = parseFloat(scrub.value) / 1000;
+    tNow = u * DATA.makespan_s;
+    render(tNow);
+  });
+
+  playBtn.addEventListener('click', () => {
+    playing = !playing;
+    playBtn.textContent = playing ? '⏸ pause' : '▶ play';
+    last = performance.now();
+    if (playing) requestAnimationFrame(loop);
+  });
+
+  for (const b of document.querySelectorAll('.speed button')) {
+    b.addEventListener('click', () => {
+      speed = parseFloat(b.dataset.speed);
+      for (const o of document.querySelectorAll('.speed button')) o.classList.remove('active');
+      b.classList.add('active');
+    });
+  }
+
+  function loop(now) {
+    if (!playing) return;
+    const dt = (now - last) / 1000;
+    last = now;
+    setT(tNow + dt * speed);
+    if (tNow >= DATA.makespan_s) {
+      playing = false; playBtn.textContent = '▶ play';
+      return;
+    }
+    requestAnimationFrame(loop);
+  }
+
+  // Keyboard shortcuts.
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') { e.preventDefault(); playBtn.click(); }
+    if (e.code === 'ArrowLeft') setT(tNow - DATA.makespan_s * 0.02);
+    if (e.code === 'ArrowRight') setT(tNow + DATA.makespan_s * 0.02);
+    if (e.code === 'Home') setT(0);
+    if (e.code === 'End') setT(DATA.makespan_s);
+  });
+
+  // Initial render.
+  setT(0);
+
+  // --- helpers ----------------------------------------------------------
+  function humanSecs(s) {
+    if (s == null) return '—';
+    if (s < 60) return s.toFixed(1) + 's';
+    if (s < 3600) return (s / 60).toFixed(1) + 'm';
+    if (s < 86400) return (s / 3600).toFixed(2) + 'h';
+    return (s / 86400).toFixed(2) + 'd';
+  }
+  function addKV(parent, k, v) {
+    const a = document.createElement('div'); a.textContent = k;
+    const b = document.createElement('div'); b.textContent = v;
+    parent.appendChild(a); parent.appendChild(b);
+  }
+  function getCss(varName) {
+    return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  }
+})();
+</script>
+</body>
+</html>

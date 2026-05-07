@@ -34,7 +34,7 @@ roma-sim = "roma_sim.cli:app"
 where = ["src"]
 
 [tool.setuptools.package-data]
-roma_sim = ["py.typed"]
+roma_sim = ["py.typed", "viewer/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
