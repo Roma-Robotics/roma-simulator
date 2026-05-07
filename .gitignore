@@ -16,12 +16,13 @@ env/
 .coverage
 htmlcov/
 
-runs/
-*.jsonl
-*.parquet
-*.duckdb
-*.sqlite
-*.sqlite-journal
+# Run-store artifacts (anchored to repo root so src/roma_sim/runs/ is unaffected).
+/runs/
+/*.jsonl
+/*.parquet
+/*.duckdb
+/*.sqlite
+/*.sqlite-journal
 
 .vscode/
 .idea/

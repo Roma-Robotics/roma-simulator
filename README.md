@@ -8,89 +8,87 @@ weeks.
 > **Optimize for**: an engineer can propose a new dispatcher policy on Monday
 > and have a defensible answer by Friday.
 
-## What's in this repo (Week 1)
+## Status (end of Week 2)
 
-- **Frozen, serializable domain types** — `Site`, `TaskGraph`, `Fleet`, `Event`,
-  `World`, `Assignment`. No I/O, no behavior.
-- **Dispatcher protocol** — the pluggable contract every policy implements.
-  Stateless, deterministic, side-effect free.
-- **Greedy nearest-task dispatcher** — the baseline every policy gets compared
-  against.
-- **SimPy-backed runner** — Tier 1.5: discrete events for durations, plus a 2D
-  constant-speed travel model so spatial conflicts are observable.
-- **Warehouse-shell scenario** — a tilt-up shell DAG (slab pour → cure →
-  panel lift → install → finish) on a 100m × 60m site.
-- **CLI** — `roma-sim run`.
-- **Property tests** — DAG order respected, one-task-per-agent, monotonic
-  event sequence, non-decreasing event time. Hypothesis-randomized over seeds.
+- Pluggable `Dispatcher` Protocol with two implementations: `greedy` and
+  `critical_path`. Engineers can drop in a new policy file and A/B test it
+  against the rest in one CLI command.
+- SimPy-backed engine with 2D constant-speed travel — Tier 1.5.
+- Frozen, serializable domain types. Every run is fully described by
+  `(scenario_version, policy_version, seed)` and produces an immutable event
+  log that replays bit-for-bit on the same Python+NumPy build.
+- Run store: SQLite metadata + Parquet event logs. Multiprocess sweep runner.
+  `compare` aggregates KPI distributions across seeds.
+- 39 tests passing — domain, dispatcher units, scenario snapshots, KPI math,
+  store roundtrip, sweep cells, and Hypothesis-randomized engine invariants.
 
-Postgres + Parquet run store, multiprocess sweep runner, KPI module,
-visual viewer, and the FastAPI/WebSocket bridge to the marketing page all
-arrive in later weeks.
+Replay (event-log → frame-by-frame `World[]`) and a visual viewer arrive in
+Week 3.
 
-## Getting started
+## Quickstart
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 
-roma-sim run --seed 0
+roma-sim --help                         # full CLI surface
+roma-sim run --seed 0                   # one sim, persisted to ./runs/
 ```
 
-Each run lands in `runs/<timestamp>-<scenario>-<dispatcher>-s<seed>/`:
-- `events.jsonl` — the durable artifact, one JSON event per line
-- `metadata.json` — scenario / policy / seed / makespan / completion
+## The R&D loop
 
-## Architecture
+```bash
+# 1. Hack on a new policy in src/roma_sim/dispatchers/<your_policy>.py.
+#    Register it in src/roma_sim/dispatchers/__init__.py::_REGISTRY.
 
-Four core abstractions, defined in `src/roma_sim/domain/`:
+# 2. Sweep it against the baselines.
+roma-sim sweep \
+  --dispatchers greedy,critical_path,your_policy \
+  --seeds 0:50 \
+  --param panel_count=8,12,16 \
+  --workers 8
 
-```python
-class Scenario(Protocol):
-    @property
-    def name(self) -> str: ...
-    @property
-    def version(self) -> str: ...
-    def build(self) -> tuple[Site, TaskGraph, Fleet]: ...
-
-class Dispatcher(Protocol):
-    @property
-    def name(self) -> str: ...
-    @property
-    def version(self) -> str: ...
-    def assign(self, world: WorldView, ready: list[Task],
-               idle: list[AgentState]) -> list[Assignment]: ...
-
-@dataclass(frozen=True)
-class World:
-    t: float
-    site: Site
-    tasks: TaskGraph
-    fleet: Fleet
-
-@dataclass(frozen=True)
-class Event:
-    t: float
-    seq: int
-    kind: EventKind
-    payload: Mapping[str, Any]
+# 3. Compare KPI distributions across seeds.
+roma-sim compare --sweep <sweep_id>
 ```
 
-Everything else (SimPy, kinematics, sampling) is implementation detail behind
-those four types.
+## CLI surface
 
-### Determinism
+| command | what it does |
+|---|---|
+| `roma-sim run` | one simulation, persisted to the run store |
+| `roma-sim sweep` | Cartesian product over `(dispatcher × param-grid × seeds)`, multiprocess |
+| `roma-sim compare` | KPI table across a sweep or a list of run_ids |
+| `roma-sim runs` | list recent runs |
+| `roma-sim sweeps` | list recorded sweeps |
+| `roma-sim show <run_id>` | show one run's metadata + KPIs |
+| `roma-sim list-dispatchers` / `list-scenarios` | registry inspection |
+
+## Run store layout
+
+```
+runs/
+├── index.sqlite          # one row per run, one row per sweep
+└── runs/<run_id>/
+    ├── events.parquet    # the durable event log
+    └── metadata.json     # human-readable mirror
+```
+
+DuckDB reads SQLite + Parquet natively, so any ad-hoc analysis is one SQL query
+away.
+
+## Determinism
 
 Per-seed reproducibility, not bitwise determinism. All randomness flows through
-a single `numpy.random.Generator` constructed from the run seed. The same
-`(scenario_version, policy_version, seed)` triple produces the same event log,
-verified by `tests/scenarios/test_warehouse_shell.py::test_run_is_seed_reproducible`.
+one `numpy.random.Generator` constructed from the run seed. Two runs with the
+same `(scenario_version, policy_version, seed)` produce identical event logs.
+The multiprocess sweep runner is deterministic per-cell.
 
 ## Testing
 
 ```bash
-pytest                  # unit + property + scenario tests
+pytest                       # 39 tests
 ruff check src tests
 mypy src
 ```
