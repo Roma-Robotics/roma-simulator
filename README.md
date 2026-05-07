@@ -1,34 +1,26 @@
 # roma-sim
 
-Internal R&D simulator for Roma's autonomous-construction stack. The engine,
-the scenario library, and the run database are the product. Live 3D, MQTT
-bridges, streaming UIs, and the marketing-page integration all defer to later
-weeks.
+Deterministic multi-agent construction simulator for Roma’s autonomous-construction stack.
 
-> **Optimize for**: an engineer can propose a new dispatcher policy on Monday
-> and have a defensible answer by Friday.
+`roma-sim` is an internal R&D platform for testing dispatch and coordination
+policies across simulated construction fleets. It provides reproducible runs,
+parameter sweeps, KPI comparison tooling, and a browser-based replay viewer
+for analyzing agent behavior over time.
 
-## Status
+---
 
-- Pluggable `Dispatcher` Protocol with two implementations: `greedy` and
-  `critical_path`. Engineers can drop in a new policy file and A/B test it
-  against the rest in one CLI command.
-- SimPy-backed engine with 2D constant-speed travel — Tier 1.5.
-- Frozen, serializable domain types. Every run is fully described by
-  `(scenario_version, policy_version, seed)` and produces an immutable event
-  log that replays bit-for-bit on the same Python+NumPy build.
-- Run store: SQLite metadata + Parquet event logs. Multiprocess sweep runner.
-  `compare` aggregates KPI distributions across seeds.
-- **Visual viewer**: `roma-sim play <run_id>` produces a self-contained
-  `viewer.html` with timeline scrubber, play/pause, and 1×–3600× speed
-  controls. Animates agents over the site with task states color-coded.
-  No build step, no server, no fetch — just `file://` and a browser.
-- 44 tests passing — domain, dispatcher units, scenario snapshots, KPI math,
-  store roundtrip, sweep cells, replay timelines, viewer payload shape, and
-  Hypothesis-randomized engine invariants.
+## Features
 
-Streamlit cross-run compare dashboard and the 2D collision-detection layer
-arrive next.
+- Deterministic SimPy-based simulation engine
+- Pluggable dispatcher policies (`greedy`, `critical_path`, custom policies)
+- Multiprocess parameter sweeps with KPI comparison tooling
+- Immutable event-log replay system backed by SQLite + Parquet
+- Self-contained browser viewer with timeline playback and agent animation
+- Fully typed, frozen domain model with reproducible seeded runs
+- 44-test suite covering engine invariants, replay integrity, KPI math,
+  store roundtrips, and randomized property tests
+
+---
 
 ## Quickstart
 
@@ -37,46 +29,62 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 
-roma-sim --help                         # full CLI surface
-roma-sim run --seed 0                   # one sim, persisted to ./runs/
-roma-sim run --seed 0 --watch           # sim + open visual viewer in browser
+roma-sim --help
+roma-sim run --seed 0
+roma-sim run --seed 0 --watch
 ```
+
+---
 
 ## Visual viewer
 
 ```bash
 roma-sim play <run_id>
-# writes runs/runs/<run_id>/viewer.html and opens it in the browser
 ```
 
-The viewer is a single self-contained HTML file: the run's payload (site
-geometry, per-agent motion segments, per-task lifecycle timestamps, KPIs,
-event log) is inlined as JSON and rendered on a Canvas2D stage with
-keyboard shortcuts (Space = play/pause, ←/→ = scrub ±2 %, Home/End = jump).
+Builds a fully self-contained `viewer.html` and opens it in the browser.
 
-It doubles as the contract for the eventual `Simulator.tsx` bridge to
-roma's marketing site — same JSON shape, just a different renderer.
+The viewer includes:
+
+- timeline scrubber
+- play / pause controls
+- 1×–3600× playback speed
+- agent motion playback
+- task lifecycle visualization
+- keyboard shortcuts
+- embedded event-log payload
+
+No build step, server, or fetch requests required — just `file://` and a
+browser.
+
+The replay payload doubles as the contract for the eventual
+`Simulator.tsx` bridge powering Roma’s marketing site.
+
+---
 
 ## The R&D loop
 
 ```bash
-# 1. Hack on a new policy in src/roma_sim/dispatchers/<your_policy>.py.
-#    Register it in src/roma_sim/dispatchers/__init__.py::_REGISTRY.
+# 1. Create a new dispatcher policy.
+#    src/roma_sim/dispatchers/<your_policy>.py
 
-# 2. Sweep it against the baselines.
+# 2. Register it.
+#    src/roma_sim/dispatchers/__init__.py::_REGISTRY
+
+# 3. Sweep against baselines.
 roma-sim sweep \
   --dispatchers greedy,critical_path,your_policy \
   --seeds 0:50 \
   --param panel_count=8,12,16 \
   --workers 8
 
-# 3. Compare KPI distributions across seeds.
+# 4. Compare KPI distributions.
 roma-sim compare --sweep <sweep_id>
 ```
 
-Example output (`--seeds 0:10 --param panel_count=8,12`, two dispatchers):
+Example output:
 
-```
+```text
               compare sweep=327da9c0b0f4
 ┏━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━┳━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━┓
 ┃ dispatcher    ┃ params         ┃  n ┃ done ┃ makespan_p50 ┃ makespan_p95 ┃ crew_idle_% ┃ tasks/h ┃ cycle_p50 ┃
@@ -88,52 +96,77 @@ Example output (`--seeds 0:10 --param panel_count=8,12`, two dispatchers):
 └───────────────┴────────────────┴────┴──────┴──────────────┴──────────────┴─────────────┴─────────┴───────────┘
 ```
 
-40-cell sweep (2 dispatchers × 2 panel counts × 10 seeds) finishes in ~0.7s
-wall time on 4 workers. The shell scenario itself is heavily gated by the
-serial `cure → finish` path, so CP only beats greedy by ~0.2h here. Bring
-your own scenario to find dispatcher gaps that matter.
+A 40-cell sweep (2 dispatchers × 2 panel counts × 10 seeds) finishes in
+~0.7s wall time on 4 workers.
+
+---
 
 ## CLI surface
 
-| command | what it does |
+| command | description |
 |---|---|
-| `roma-sim run` | one simulation, persisted to the run store |
-| `roma-sim sweep` | Cartesian product over `(dispatcher × param-grid × seeds)`, multiprocess |
-| `roma-sim compare` | KPI table across a sweep or a list of run_ids |
+| `roma-sim run` | run one simulation |
+| `roma-sim sweep` | Cartesian sweep across dispatchers, params, and seeds |
+| `roma-sim compare` | aggregate KPI distributions |
 | `roma-sim runs` | list recent runs |
 | `roma-sim sweeps` | list recorded sweeps |
-| `roma-sim show <run_id>` | show one run's metadata + KPIs |
-| `roma-sim play <run_id>` | build self-contained HTML viewer + open in browser |
-| `roma-sim list-dispatchers` / `list-scenarios` | registry inspection |
+| `roma-sim show <run_id>` | inspect metadata + KPIs |
+| `roma-sim play <run_id>` | build replay viewer |
+| `roma-sim list-dispatchers` | inspect dispatcher registry |
+| `roma-sim list-scenarios` | inspect scenario registry |
+
+---
 
 ## Run store layout
 
-```
+```text
 runs/
-├── index.sqlite          # one row per run, one row per sweep
+├── index.sqlite
 └── runs/<run_id>/
-    ├── events.parquet    # the durable event log
-    └── metadata.json     # human-readable mirror
+    ├── events.parquet
+    └── metadata.json
 ```
 
-DuckDB reads SQLite + Parquet natively, so any ad-hoc analysis is a SQL query
-away:
+Each run is fully described by:
+
+```text
+(scenario_version, policy_version, seed)
+```
+
+Runs are immutable and replayable on the same Python + NumPy build.
+
+DuckDB can query SQLite and Parquet directly:
 
 ```python
 import duckdb
+
 con = duckdb.connect()
+
 con.execute("INSTALL sqlite; LOAD sqlite;")
 con.execute("ATTACH 'runs/index.sqlite' (TYPE SQLITE);")
-con.sql("SELECT dispatcher_name, AVG(makespan_s)/3600 FROM index.runs GROUP BY 1").show()
-con.sql("SELECT * FROM read_parquet('runs/runs/<run_id>/events.parquet')").show()
+
+con.sql("""
+SELECT dispatcher_name,
+       AVG(makespan_s)/3600
+FROM index.runs
+GROUP BY 1
+""").show()
+
+con.sql("""
+SELECT *
+FROM read_parquet('runs/runs/<run_id>/events.parquet')
+""").show()
 ```
+
+---
 
 ## Architecture
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│  Engine (pure Python, no IO)                                         │
-│   Scenario  ──▶  World state  ──tick──▶  Dispatcher  ──▶  Events     │
+│  Engine (pure Python, no IO)                                        │
+│                                                                      │
+│   Scenario ──▶ World state ──tick──▶ Dispatcher ──▶ Events           │
 └──────────────────────────────────────────────────────────────────────┘
             │                                              │
             ▼                                              ▼
@@ -148,28 +181,38 @@ con.sql("SELECT * FROM read_parquet('runs/runs/<run_id>/events.parquet')").show(
                                                ┌──────────────────────┐
                                                │  Compare / Analyze   │
                                                │  - KPI module        │
-                                               │  - notebooks (week3) │
-                                               │  - Streamlit (week3) │
+                                               │  - notebooks         │
+                                               │  - Streamlit         │
                                                └──────────────────────┘
 ```
 
-The four core abstractions, defined in `src/roma_sim/domain/`:
+Core abstractions:
 
 ```python
 class Scenario(Protocol):
     @property
     def name(self) -> str: ...
+
     @property
     def version(self) -> str: ...
+
     def build(self) -> tuple[Site, TaskGraph, Fleet]: ...
+
 
 class Dispatcher(Protocol):
     @property
     def name(self) -> str: ...
+
     @property
     def version(self) -> str: ...
-    def assign(self, world: WorldView, ready: list[Task],
-               idle: list[AgentState]) -> list[Assignment]: ...
+
+    def assign(
+        self,
+        world: WorldView,
+        ready: list[Task],
+        idle: list[AgentState],
+    ) -> list[Assignment]: ...
+
 
 @dataclass(frozen=True)
 class World:
@@ -177,6 +220,7 @@ class World:
     site: Site
     tasks: TaskGraph
     fleet: Fleet
+
 
 @dataclass(frozen=True)
 class Event:
@@ -186,80 +230,130 @@ class Event:
     payload: Mapping[str, Any]
 ```
 
+---
+
 ## Determinism guarantees
 
-Per-seed reproducibility, not bitwise determinism. All randomness flows
-through one `numpy.random.Generator` constructed from the run seed. Two runs
-with the same `(scenario_version, policy_version, seed)` produce identical
-event logs, and the test suite pins this in
-`tests/scenarios/test_warehouse_shell.py::test_run_is_seed_reproducible`.
+All stochastic behavior flows through a single seeded
+`numpy.random.Generator`.
 
-The multiprocess sweep runner is deterministic per-cell: each worker re-seeds
-its own RNG, so worker-pool scheduling order does not affect any individual
-run's output.
+Two runs with the same:
+
+```text
+(scenario_version, policy_version, seed)
+```
+
+produce identical event logs on the same Python + NumPy build.
+
+Multiprocess sweeps remain deterministic per-cell because each worker
+re-seeds its own RNG independently.
+
+Seed reproducibility is pinned in:
+
+```text
+tests/scenarios/test_warehouse_shell.py::test_run_is_seed_reproducible
+```
+
+Bitwise cross-platform determinism is not currently a goal.
+
+---
 
 ## Repo layout
 
-```
+```text
 roma-simulator/
 ├── pyproject.toml
 ├── src/roma_sim/
-│   ├── domain/                # frozen dataclasses, no IO
+│   ├── domain/
 │   ├── engine/
-│   │   ├── runner.py          # SimPy event loop
-│   │   └── stochastics.py     # seeded duration sampling
-│   ├── dispatchers/           # ← the R&D playground
-│   │   ├── base.py            # Protocol
+│   │   ├── runner.py
+│   │   └── stochastics.py
+│   ├── dispatchers/
+│   │   ├── base.py
 │   │   ├── greedy.py
 │   │   └── critical_path.py
 │   ├── scenarios/
 │   │   └── warehouse_shell.py
 │   ├── analysis/
-│   │   └── kpis.py            # KPI computation from event logs
+│   │   └── kpis.py
 │   ├── runs/
-│   │   ├── store.py           # SQLite + Parquet
-│   │   ├── sweep.py           # multiprocess sweep runner
-│   │   ├── compare.py         # KPI aggregation across runs
-│   │   └── replay.py          # event log → viewer-ready timelines
+│   │   ├── store.py
+│   │   ├── sweep.py
+│   │   ├── compare.py
+│   │   └── replay.py
 │   ├── viewer/
-│   │   ├── template.html      # self-contained Canvas2D player
-│   │   └── builder.py         # bake payload into HTML, open browser
+│   │   ├── template.html
+│   │   └── builder.py
 │   └── cli.py
 └── tests/
-    ├── property/              # Hypothesis tests on invariants
-    ├── dispatchers/           # per-policy unit tests
-    ├── scenarios/             # snapshot + reproducibility tests
+    ├── property/
+    ├── dispatchers/
+    ├── scenarios/
     ├── test_kpis.py
     ├── test_store.py
     └── test_sweep.py
 ```
 
+---
+
 ## Testing
 
 ```bash
-pytest                       # 39 tests
+pytest
 ruff check src tests
 mypy src
 ```
 
+Current coverage includes:
+
+- dispatcher policy tests
+- scenario snapshots
+- KPI validation
+- store roundtrips
+- replay payload integrity
+- Hypothesis property tests
+- engine invariant checks
+
+---
+
 ## Roadmap
 
-- **Next**: Streamlit cross-run dashboard (KPI distributions across seeds
-  per dispatcher), Hypothesis regression gates in CI, 2D spatial-conflict
-  KPIs (`collisions_per_h`, `queue_depth_at_lift_bay`), FastAPI/WebSocket
-  layer that streams a live run to the marketing `Simulator.tsx`.
-- **Beyond**: ILP dispatcher with OR-Tools, parameterized scenarios from
-  config, IFC ingestion, learned dispatcher trained on the event log.
+### Next
 
-## Defaults this scaffold picked
+- Streamlit cross-run KPI dashboard
+- Hypothesis regression gates in CI
+- 2D spatial-conflict KPIs
+  - `collisions_per_h`
+  - `queue_depth_at_lift_bay`
+- FastAPI/WebSocket live-run streaming
+- `Simulator.tsx` bridge for Roma marketing demos
 
-These were left open in the original plan — flagged here so they're easy to
-revisit:
+### Beyond
 
-- **Hosting**: internal-only. SQLite + Parquet under `./runs/`. Hosted
-  Postgres is a Week-4 task if we need it.
-- **Determinism**: per-seed statistical reproducibility via
-  `numpy.random.default_rng`. Bitwise cross-platform is not a goal at Tier 1.
-- **Scenario authorship**: engineers-only Python. YAML / UI authoring deferred.
-- **Existing tools**: schema is designed to be extensible to IFC / Revit / P6;
-  Week 1 and 2 ship a synthetic warehouse shell.
+- OR-Tools ILP dispatcher
+- parameterized config-driven scenarios
+- IFC ingestion
+- learned dispatch policies trained from event logs
+
+---
+
+## Defaults and tradeoffs
+
+These choices were intentionally optimized for iteration speed at Tier 1:
+
+| area | decision |
+|---|---|
+| hosting | local SQLite + Parquet |
+| determinism | seeded reproducibility |
+| scenario authoring | Python-only |
+| deployment target | internal R&D |
+| geometry | synthetic warehouse shell |
+| persistence | immutable event logs |
+
+The schema is intentionally extensible toward:
+
+- IFC / Revit ingestion
+- Primavera / P6 schedule integration
+- live fleet telemetry
+- distributed simulation execution
+- browser-native visualization
